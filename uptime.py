@@ -4,7 +4,6 @@ from threading import Thread
 
 app = Flask("")
 
-
 @app.route("/")
 def home():
     return "I am currently online!"
