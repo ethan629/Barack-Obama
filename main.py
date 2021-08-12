@@ -4,6 +4,7 @@
 import discord
 from discord.ext import commands
 from discord.ext.commands import has_permissions
+from discord.ext.commands.cooldowns import BucketType
 from replit import db
 import os
 import json
@@ -11,6 +12,8 @@ import random
 import requests
 from googlesearch import search as gsearch
 from uptime import online
+from PIL import Image, ImageOps
+
 
 def get_prefix(bot, message):
     with open("prefixes.json", "r") as f:
@@ -57,6 +60,26 @@ async def on_ready():
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f".help || {len(bot.guilds)} servers"))
     print("Successfully logged in as {0.user}".format(bot))
 
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        cooldown = error.retry_after
+        cooldown = round(cooldown)
+        if cooldown >= 86400:
+            await ctx.send(f"This command is on a {cooldown//86400} day cooldown.")
+            cooldown = 0
+        elif cooldown >= 3600:
+            await ctx.send(f"This command is on a {cooldown//3600} hour cooldown.")
+            cooldown = 0
+        elif cooldown >= 60:
+            await ctx.send(f"This command is on a {cooldown//60} minute cooldown.")
+            cooldown = 0
+        else:
+            await ctx.send(f"This command is on a {cooldown} second cooldown.")
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send("Command not found.")
+    raise error
+
 def get_quote():
     response = requests.get("https://zenquotes.io/api/random")
     data = json.loads(response.text)
@@ -92,6 +115,18 @@ def get_joke():
     data = json.loads(response.text)
     setup, punchline = data["setup"], data["punchline"]
     return [setup, punchline]
+
+def get_insult():
+    response = requests.get("https://evilinsult.com/generate_insult.php?lang=en&type=json")
+    data = json.loads(response.text)
+    insult = data["insult"]
+    return insult
+
+def word_facts(word):
+    response = requests.get(f"https://api.dictionaryapi.dev/api/v2/entries/en_US/{word}")
+    data = json.loads(response.text)
+    audio, speech, meaning = data[0]["phonetics"][0]["audio"], data[0]["meanings"][0]["partOfSpeech"], data[0]["meanings"][0]["definitions"][0]["definition"]
+    return [audio, speech, meaning]
 
 def locate_iss():
     response = requests.get("http://api.open-notify.org/iss-now.json")
@@ -140,13 +175,24 @@ async def bye(ctx):
 async def repeat(ctx, *, args):
     await ctx.send(args)
 
+@bot.command(aliases=["word", "dictionary"])
+async def definition(ctx, word):
+    data = word_facts(word)
+    embed = discord.Embed(title="💬 Your definition:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", color=discord.Color.blue())
+    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+    embed.add_field(name="Word", value=word.title(), inline=True)
+    embed.add_field(name="Audio", value=data[0], inline=True)
+    embed.add_field(name="Part of speech", value=data[1], inline=True)
+    embed.add_field(name="Meaning", value=data[2], inline=True)
+    await ctx.send(embed=embed)
+
 @bot.command()
 async def quote(ctx):
     embed = discord.Embed(title="💬 Your quote:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=get_quote(), color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(aliases=["coin"])
 async def coinflip(ctx):
     results = ["Heads", "Tails"]
     choice = random.choice(results)
@@ -154,6 +200,11 @@ async def coinflip(ctx):
     embed = discord.Embed(title="Your coinflip result:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=choice, color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
+
+@bot.command(aliases=["rolldice", "roll"])
+async def dice(ctx):
+    result = random.randint(1, 6)
+    await ctx.send(f"You rolled a {result}!")
 
 @bot.command()
 async def number(ctx, end):
@@ -163,20 +214,20 @@ async def number(ctx, end):
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(aliases=["dogpic"])
 async def dog(ctx):
     embed = discord.Embed(title="🐶 Your dog picture:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     embed.set_image(url=dog_pic())
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(aliases=["catpic"])
 async def cat(ctx):
     embed = discord.Embed(title="🐱 Your cat picture:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",color=discord.Color.blue())
     embed.set_image(url=cat_pic())
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(aliases=["foxpic"])
 async def fox(ctx):
     embed = discord.Embed(title="🦊 Your fox picture:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",color=discord.Color.blue())
     embed.set_image(url=fox_pic())
@@ -188,12 +239,18 @@ async def funfact(ctx):
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(aliases=["funny"])
 async def joke(ctx):
     embed = discord.Embed(title="😂 Your joke:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     output = get_joke()
     embed.add_field(name=output[0], value=output[1])
+    await ctx.send(embed=embed)
+
+@bot.command(alises=["comeback"])
+async def insult(ctx):
+    embed = discord.Embed(title="😠 Your insult:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=get_insult(), color=discord.Color.blue())
+    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -215,12 +272,11 @@ async def meme(ctx):
     embed.set_image(url=info[2])
     await ctx.send(embed=embed)
 
-@bot.command(alises=["google"])
+@bot.command(alises=["google", "googlesearch"])
 async def search(ctx, *, query):
     result = google_search(query)
     embed = discord.Embed(title="Your search results:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"{result[0]}\n{result[1]}\n{result[2]}\n{result[3]}\n{result[4]}", color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
-
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -325,7 +381,7 @@ async def lcm(ctx, num1, num2):
 
     await ctx.send(lcm)
 
-@bot.command()
+@bot.command(aliases=["findprimes"])
 async def primes(ctx, num1, num2):
     num1, num2 = int(num1), int(num2)
     primes = []
@@ -340,23 +396,60 @@ async def primes(ctx, num1, num2):
     primes = str(primes).strip("[]").replace("\'", ", ")
     await ctx.send(primes)
 
-@bot.command(aliases=["latency"])
+@bot.command(aliases=["greyscale", "blackandwhite", "bw"])
+async def grayscale(ctx):
+    await ctx.message.attachments[0].save("image.png")
+    file = Image.open("image.png")
+    file = file.convert("L")
+    file.save("output.png")
+    await ctx.send(file=discord.File("output.png"))
+    os.remove("image.png")
+    os.remove("output.png")
+
+@bot.command(alises=["turn"])
+async def rotate(ctx, degrees):
+    degrees = int(degrees)
+    await ctx.message.attachments[0].save("image.png")
+    file = Image.open("image.png")
+    file = file.rotate(degrees)
+    file.save("output.png")
+    await ctx.send(file=discord.File("output.png"))
+    os.remove("image.png")
+    os.remove("output.png")
+
+@bot.command(aliases=["imgstats", "imginfo", "imagestats"])
+async def imageinfo(ctx):
+    await ctx.message.attachments[0].save("image.png")
+    file = Image.open("image.png")
+    size = file.size
+    mode = file.mode
+    
+    embed = discord.Embed(title="Image info:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", color=discord.Color.blue())
+    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+    image = discord.File("image.png", filename="image.png")
+    embed.set_image(url="attachment://image.png")
+    embed.add_field(name="Image size", value=f"{size[0]}, {size[1]}", inline=True)
+    embed.add_field(name="Image mode", value=mode, inline=True)
+    await ctx.send(file=image, embed=embed)
+    os.remove("image.png")
+
+@bot.command(aliases=["latency", "pong"])
 async def ping(ctx):
     embed = discord.Embed(title="🏓 Pong!", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"My ping is {round(bot.latency*1000)}ms", color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
-@bot.command(aliases=["info", "about_me"])
+@bot.command(aliases=["info", "botinfo"])
 async def about(ctx):
     embed = discord.Embed(title="About me:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     embed.set_thumbnail(url="https://cdn.discordapp.com/avatars/870359778843586621/10622885f15bfe05b026e80cbdd39b34.png?size=256")
 
     embed.add_field(name="Owner", value="ethAN#3163", inline=True)
-    embed.add_field(name="Coding language", value="Python", inline=True)
+    embed.add_field(name="Coding language", value="Python 3.9", inline=True)
     embed.add_field(name="Date created", value="July 26th, 2021", inline=True)
-    embed.add_field(name="Lines of code", value="Over 500", inline=True)
-    embed.add_field(name="Github", value="https://github.com/ethan629/obama-bot", inline=True)
+    embed.add_field(name="Lines of code", value="Over 700", inline=True)
+    embed.add_field(name="Github", value="https://github.com/ethan629/Barack-Obama", inline=True)
     embed.add_field(name="Support server", value="https://discord.gg/duycJBmXzC", inline=True)
     await ctx.send(embed=embed)
 
@@ -451,23 +544,13 @@ async def warn(ctx, user:discord.Member, reason="None"):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def help(ctx):
-    embed = discord.Embed(title="Help page:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",color=discord.Color.blue())
-    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
-    embed.add_field(name=".help_math", value="Commands for math.", inline=True)
-    embed.add_field(name=".help_fun", value="Commands for fun.", inline=True)
-    embed.add_field(name=".help_utility", value="Commands for utility.", inline=True)
-    embed.add_field(name=".help_moderation", value="Commands for moderation.", inline=True)
-
-    await ctx.send(embed=embed)
-
-@bot.command()
 async def start(ctx):
     db[f"{ctx.author.id}_bank"] = 0
     db[f"{ctx.author.id}_wallet"] = 0
     await ctx.send(f"{ctx.author.display_name} is now registered for the currency system.")
 
 @bot.command(aliases=["beg"])
+@commands.cooldown(1, 45, commands.BucketType.user)
 async def free(ctx):
     amount = random.randint(10, 1000)
     db[f"{ctx.author.id}_wallet"] += amount
@@ -477,12 +560,24 @@ async def free(ctx):
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
+@bot.command()
+@commands.cooldown(1, 86400, commands.BucketType.user)
+async def daily(ctx):
+    db[f"{ctx.author.id}_wallet"] += 1000
+    await ctx.send("You recieved 1000 coins for your daily reward!")
+
+@bot.command()
+@commands.cooldown(1, 604800, commands.BucketType.user)
+async def weekly(ctx):
+    db[f"{ctx.author.id}_wallet"] += 10000
+    await ctx.send("You recieved 10000 coins for your daily reward!")
+
 @bot.command(aliases=["bal"])
 async def balance(ctx):
     wallet = db[f"{ctx.author.id}_wallet"]
     bank = db[f"{ctx.author.id}_bank"]
 
-    embed = discord.Embed(title="Your balance.", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"Wallet: {wallet}\nBank: {bank}", color=discord.Color.blue())
+    embed = discord.Embed(title=f"{ctx.author.display_name}'s balance.", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"Wallet: {wallet}\nBank: {bank}", color=discord.Color.blue())
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
     await ctx.send(embed=embed)
 
@@ -496,16 +591,19 @@ async def deposit(ctx, amount):
 
         await ctx.send(f"You deposited all of your coins, you now have {wallet} coins in your wallet and {bank} coins in your bank.")
     else:
-        if amount < wallet:
-            amount = int(amount)
-            db[f"{ctx.author.id}_bank"] += amount
-            db[f"{ctx.author.id}_wallet"] -= amount
-            bank = db[f"{ctx.author.id}_bank"]
-            wallet = db[f"{ctx.author.id}_wallet"]
+        amount = int(amount)
+        if amount >= 0:
+            if amount < wallet:
+                db[f"{ctx.author.id}_bank"] += amount
+                db[f"{ctx.author.id}_wallet"] -= amount
+                bank = db[f"{ctx.author.id}_bank"]
+                wallet = db[f"{ctx.author.id}_wallet"]
 
-            await ctx.send(f"You deposited {amount} coins, you now have {wallet} coins in your wallet and {bank} coins in your bank.")
+                await ctx.send(f"You deposited {amount} coins, you now have {wallet} coins in your wallet and {bank} coins in your bank.")
+            else:
+                await ctx.send("You can't deposit more than what you have!")
         else:
-            await ctx.send("You can't deposit more than what you have!")
+            await ctx.send("You can't deposit a negative number.")
 
 @bot.command(aliases=["with"])
 async def withdraw(ctx, amount):
@@ -517,16 +615,109 @@ async def withdraw(ctx, amount):
 
         await ctx.send(f"You withdrawed all of your coins, you now have {wallet} coins in your wallet and {bank} coins in your bank.")
     else:
-        if amount < bank:
-            amount = int(amount)
-            db[f"{ctx.author.id}_bank"] -= amount
-            db[f"{ctx.author.id}_wallet"] += amount
-            bank = db[f"{ctx.author.id}_bank"]
-            wallet = db[f"{ctx.author.id}_wallet"]
+        amount = int(amount)
+        if amount >= 0:
+            if amount < bank:
+                db[f"{ctx.author.id}_bank"] -= amount
+                db[f"{ctx.author.id}_wallet"] += amount
+                bank = db[f"{ctx.author.id}_bank"]
+                wallet = db[f"{ctx.author.id}_wallet"]
 
-            await ctx.send(f"You withdrawed {amount} coins, you now have {wallet} coins in your wallet and {bank} coins in your bank.")
+                await ctx.send(f"You withdrawed {amount} coins, you now have {wallet} coins in your wallet and {bank} coins in your bank.")
+            else:
+                await ctx.send("You can't withdraw more than what you have!")
         else:
-            await ctx.send("You can't withdraw more than what you have!")
+            await ctx.send("You can't withdraw a negative number.")
+
+@bot.command(aliases=["share", "grant"])
+async def give(ctx, user:discord.Member, amount):
+    if user.id == ctx.author.id:
+        await ctx.send("You can't give yourself money.")
+    userid = user.id
+    if amount == "all" or amount == "max":
+        db[f"{userid}_wallet"] += db[f"{ctx.author.id}_wallet"]
+        db[f"{ctx.author.id}_wallet"] = 0
+        reciever = db[f"{userid}_wallet"]
+        giver = db[f"{ctx.author.id}_wallet"]
+
+        await ctx.send(f"You gave all your coins to {user}, you now have {giver} coins in your wallet and {user} has {reciever}.")
+    else:
+        amount = int(amount)
+        if amount >= 0:
+            wallet = db[f"{ctx.author.id}_wallet"]
+            if amount < wallet:
+                db[f"{ctx.author.id}_wallet"] -= amount
+                db[f"{userid}_wallet"] += amount
+                reciever = db[f"{userid}_wallet"]
+                giver = db[f"{ctx.author.id}_wallet"]
+
+                await ctx.send(f"You gave {amount} your coins to {user}, you now have {giver} coins in your wallet and {user} has {reciever}.")
+            else:
+                await ctx.send("You can't give more than what you have!")
+        else:
+            await ctx.send("You can't give a negative number.")   
+
+@bot.command(aliases=["gamble", "wager", "casino"])
+async def bet(ctx, amount):
+    if amount == "all" or amount == "max":
+        user = random.randint(1, 12)
+        bot = random.randint(1, 12)
+        if user > bot:
+            db[f"{ctx.author.id}_wallet"] += db[f"{ctx.author.id}_wallet"]
+
+            embed = discord.Embed(title=f"Your bet:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"You rolled {user}.\nBot rolled {bot}.\n\nYou win!",color=discord.Color.blue())
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+
+            await ctx.send(embed=embed)
+        elif user == bot:
+            embed = discord.Embed(title=f"Your bet:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"You rolled {user}.\nBot rolled {bot}.\n\nYou tied.",color=discord.Color.blue())
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+
+            await ctx.send(embed=embed)
+        elif user < bot:
+            db[f"{ctx.author.id}_wallet"] = 0
+
+            embed = discord.Embed(title=f"Your bet:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"You rolled {user}.\nBot rolled {bot}.\n\nYou lost.",color=discord.Color.blue())
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+
+            await ctx.send(embed=embed)
+    else:
+        amount = int(amount)
+        user = random.randint(1, 12)
+        bot = random.randint(1, 12)
+        if user > bot:
+            db[f"{ctx.author.id}_wallet"] += amount
+
+            embed = discord.Embed(title=f"Your bet:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"You rolled {user}.\nBot rolled {bot}.\n\nYou win!",color=discord.Color.blue())
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+
+            await ctx.send(embed=embed)
+        elif user == bot:
+
+            embed = discord.Embed(title=f"Your bet:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"You rolled {user}.\nBot rolled {bot}.\n\nYou tied.",color=discord.Color.blue())
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+
+            await ctx.send(embed=embed)
+        elif user < bot:
+            db[f"{ctx.author.id}_wallet"] -= amount
+
+            embed = discord.Embed(title=f"Your bet:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", description=f"You rolled {user}.\nBot rolled {bot}.\n\nYou lost.",color=discord.Color.blue())
+            embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+
+            await ctx.send(embed=embed)
+
+@bot.command(aliases=["commands"])
+async def help(ctx):
+    embed = discord.Embed(title="Help page:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",color=discord.Color.blue())
+    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+    embed.add_field(name=".help", value="Shows this page.", inline=True)
+    embed.add_field(name=".help_math", value="Commands for math.", inline=True)
+    embed.add_field(name=".help_fun", value="Commands for fun.", inline=True)
+    embed.add_field(name=".help_utility", value="Commands for utility.", inline=True)
+    embed.add_field(name=".help_moderation", value="Commands for moderation.", inline=True)
+    embed.add_field(name=".help_currency", value="Commands for currency.", inline=True)
+
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def help_math(ctx):
@@ -556,6 +747,7 @@ async def help_fun(ctx):
     embed.add_field(name=".quote", value="Outputs a random quote.", inline=True)
     embed.add_field(name=".funfact", value="Outputs a random fun fact.", inline=True)
     embed.add_field(name=".joke", value="Outputs a random joke.", inline=True)
+    embed.add_field(name=".insult", value="Outputs a random insult.", inline=True)
     embed.add_field(name=".space", value="Outputs some current facts about space.", inline=True)
     embed.add_field(name=".meme", value="Outputs a random meme.", inline=True)
     embed.add_field(name=".dog", value="Outputs a random dog picture.", inline=True)
@@ -563,6 +755,7 @@ async def help_fun(ctx):
     embed.add_field(name=".fox", value="Outputs a random fox picture.", inline=True)
     embed.add_field(name=".search", value="Outputs the top five search results of your inputed query.", inline=True)
     embed.add_field(name=".coinflip", value="Outputs the result of a coinflip.", inline=True)
+    embed.add_field(name=".dice", value="Outputs the result of dice being rolled.", inline=True)
     embed.add_field(name=".number", value="Outputs a random number within a limit.", inline=True)
     await ctx.send(embed=embed)
 
@@ -590,6 +783,21 @@ async def help_moderation(ctx):
     embed.add_field(name=".purge", value="Purges the messages within a limit.", inline=True)
     embed.add_field(name=".slowmode", value="Sets the channel slowmode to an amount.", inline=True)
     await ctx.send(embed=embed)
+
+@bot.command()
+async def help_currency(ctx):
+    embed = discord.Embed(title="Help page:", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", color=discord.Color.blue())
+    embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.avatar_url)
+    embed.add_field(name=".start", value="Registers you for the currency system.", inline=True)
+    embed.add_field(name=".free", value="Gives you free coins.", inline=True)
+    embed.add_field(name=".daily", value="Gives you free coins every day.", inline=True)
+    embed.add_field(name=".weekly", value="Gives you free coins every week.", inline=True)
+    embed.add_field(name=".gamble", value="Gives you a chance to win or lose coins.", inline=True)
+    embed.add_field(name=".balance", value="Displays your balance.", inline=True)
+    embed.add_field(name=".deposit", value="Deposits your coins.", inline=True)
+    embed.add_field(name=".withdraw", value="Withdraws your coins.", inline=True)
+    await ctx.send(embed=embed)
+
 
 online()
 secret = os.environ["token"]
